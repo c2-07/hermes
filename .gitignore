@@ -1,0 +1,72 @@
+# Operating system generated files
+.DS_Store
+Thumbs.db
+
+# Go specific
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts and logs
+*.log
+*.tmp
+*.cache
+coverage/
+dist/
+web/dist/
+web/public/build/
+
+# Node and npm
+node_modules/
+web/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Minified assets (generated)
+*.min.js
+*.min.css
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Environment files
+*.env
+!.env.example
+
+# Virtual environments and pip
+*.pyc
+__pycache__/
+
+# Miscellaneous
+*.iml
+*.swp
+*.bak
+*.tmp
+*.orig
+\.history/
+
+# Docker and docker-compose
+docker-compose?.yml
+
+# Logs
+*.log
+
+# Tests
+/test-output/
+*.coverage
+*coverage*.txt
+
+# Backup files
+*.bak
+*.old
+original
+lint.json
+FILESING.txt
+# End of .gitignore
