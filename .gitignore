@@ -1,6 +1,9 @@
 # Operating system generated files
 .DS_Store
 Thumbs.db
+database.db
+database.db-shm
+database.db-wal
 
 # Go specific
 bin/
