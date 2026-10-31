@@ -4,6 +4,9 @@ import { check } from 'k6';
 
 const BATCH_SIZE = Number(__ENV.BATCH_SIZE || 100);
 const scenarioName = __ENV.SCENARIO || 'random_spikes';
+const duration = __ENV.DURATION || '30s';
+const writeOnly = __ENV.WRITE_ONLY === 'true';
+const baseURL = __ENV.BASE_URL || 'http://localhost:3000';
 const batchWrites = new Counter('batch_writes');
 const payload = JSON.stringify(
     Array.from({ length: BATCH_SIZE }, () => ({
@@ -31,7 +34,7 @@ const scenarios = {
         executor: 'constant-arrival-rate',
         rate: highRate,
         timeUnit: '1s',
-        duration: '30s',
+            duration,
         preAllocatedVUs: 100,
         maxVUs: 2000,
         exec: 'constantHigh',
@@ -50,8 +53,11 @@ export const options = {
 
 function submitBatch() {
     batchWrites.add(BATCH_SIZE);
+    const endpoint = writeOnly
+        ? `${baseURL}/submit/batch?response=none`
+        : `${baseURL}/submit/batch`;
     const res = http.post(
-        'http://localhost:3000/submit/batch',
+        endpoint,
         payload,
         {
             headers: {
@@ -61,7 +67,7 @@ function submitBatch() {
     );
 
     check(res, {
-        'status is 201': (r) => r.status === 201,
+        'write succeeded': (r) => writeOnly ? r.status === 204 : r.status === 201,
     });
 }
 

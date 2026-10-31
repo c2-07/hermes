@@ -27,10 +27,30 @@ func getConnection() *sql.DB {
 	if synchronous == "" {
 		synchronous = "NORMAL"
 	}
+	journalMode := os.Getenv("HERMES_SQLITE_JOURNAL_MODE")
+	if journalMode == "" {
+		journalMode = "WAL"
+	}
+	lockingMode := os.Getenv("HERMES_SQLITE_LOCKING_MODE")
+	if lockingMode == "" {
+		lockingMode = "EXCLUSIVE"
+	}
+	tempStore := os.Getenv("HERMES_SQLITE_TEMP_STORE")
+	if tempStore == "" {
+		tempStore = "MEMORY"
+	}
+	cacheSize := os.Getenv("HERMES_SQLITE_CACHE_SIZE")
+	if cacheSize == "" {
+		cacheSize = "-65536"
+	}
+	mmapSize := os.Getenv("HERMES_SQLITE_MMAP_SIZE")
+	if mmapSize == "" {
+		mmapSize = "268435456"
+	}
 
 	db, err := sql.Open(
 		"sqlite3",
-		"file:"+databasePath+"?_journal_mode=WAL&_synchronous="+synchronous+"&_locking_mode=EXCLUSIVE&_busy_timeout=5000&_temp_store=MEMORY&_cache_size=-65536&_mmap_size=268435456",
+		"file:"+databasePath+"?_journal_mode="+journalMode+"&_synchronous="+synchronous+"&_locking_mode="+lockingMode+"&_busy_timeout=5000&_temp_store="+tempStore+"&_cache_size="+cacheSize+"&_mmap_size="+mmapSize,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -148,6 +168,11 @@ func submitBatch(db *sql.DB, insert *sql.Stmt) http.HandlerFunc {
 			return
 		}
 
+		if r.URL.Query().Get("response") == "none" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		respondJSON(w, http.StatusCreated, data)
 	}
 }
@@ -242,6 +267,11 @@ func main() {
 	r.Get("/submissions", getSubmissions(db))
 	r.Get("/submissions/{id}", getSubmission(db))
 
-	log.Println("Server running on :3000")
-	log.Fatal(http.ListenAndServe(":3000", r))
+	address := os.Getenv("HERMES_ADDR")
+	if address == "" {
+		address = ":3000"
+	}
+
+	log.Printf("Server running on %s", address)
+	log.Fatal(http.ListenAndServe(address, r))
 }
