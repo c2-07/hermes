@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	// "github.com/go-chi/chi/v5/middleware"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Submission struct {
@@ -19,20 +19,25 @@ type Submission struct {
 }
 
 func getConnection() *sql.DB {
+	databasePath := os.Getenv("HERMES_DB")
+	if databasePath == "" {
+		databasePath = "database.db"
+	}
+	synchronous := os.Getenv("HERMES_SQLITE_SYNCHRONOUS")
+	if synchronous == "" {
+		synchronous = "NORMAL"
+	}
+
 	db, err := sql.Open(
-		"sqlite",
-		"file:database.db?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+		"sqlite3",
+		"file:"+databasePath+"?_journal_mode=WAL&_synchronous="+synchronous+"&_locking_mode=EXCLUSIVE&_busy_timeout=5000&_temp_store=MEMORY&_cache_size=-65536&_mmap_size=268435456",
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	_, err = db.Exec(`PRAGMA journal_mode=WAL`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	db.SetMaxOpenConns(5)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if err := db.Ping(); err != nil {
 		log.Fatal(err)
@@ -56,7 +61,7 @@ func createTable(db *sql.DB) {
 	}
 }
 
-func submit(db *sql.DB) http.HandlerFunc {
+func submit(insert *sql.Stmt) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var data Submission
 
@@ -70,9 +75,8 @@ func submit(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		result, err := db.ExecContext(
+		result, err := insert.ExecContext(
 			r.Context(),
-			`INSERT INTO submissions (name, message) VALUES (?, ?)`,
 			data.Name,
 			data.Message,
 		)
@@ -90,6 +94,60 @@ func submit(db *sql.DB) http.HandlerFunc {
 		}
 
 		data.ID = id
+		respondJSON(w, http.StatusCreated, data)
+	}
+}
+
+func submitBatch(db *sql.DB, insert *sql.Stmt) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var data []Submission
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if len(data) == 0 {
+			http.Error(w, "At least one submission is required", http.StatusBadRequest)
+			return
+		}
+		for _, submission := range data {
+			if submission.Name == "" || submission.Message == "" {
+				http.Error(w, "Missing fields", http.StatusBadRequest)
+				return
+			}
+		}
+
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		batchInsert := tx.Stmt(insert)
+		for index := range data {
+			result, err := batchInsert.ExecContext(
+				r.Context(),
+				data[index].Name,
+				data[index].Message,
+			)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, "Database error", http.StatusInternalServerError)
+				return
+			}
+
+			data[index].ID, err = result.LastInsertId()
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, "Failed to retrieve ID", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
 		respondJSON(w, http.StatusCreated, data)
 	}
 }
@@ -171,10 +229,16 @@ func main() {
 
 	createTable(db)
 
-	r := chi.NewRouter()
-	// r.Use(middleware.Logger)
+	insert, err := db.Prepare(`INSERT INTO submissions (name, message) VALUES (?, ?)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer insert.Close()
 
-	r.Post("/submit", submit(db))
+	r := chi.NewRouter()
+
+	r.Post("/submit", submit(insert))
+	r.Post("/submit/batch", submitBatch(db, insert))
 	r.Get("/submissions", getSubmissions(db))
 	r.Get("/submissions/{id}", getSubmission(db))
 
